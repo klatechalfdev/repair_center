@@ -514,7 +514,7 @@ async function getDashboard2(auth, filter) {
 
   const statusAgg = { Baru: 0, Inprogress: 0, Selesai: 0, Kembali: 0, Diambil: 0 };
   let totalOmset = 0, jasaRevenue = 0, biayaSparepart = 0;
-  const dayOmsetMap = {};
+  const dayOmsetMap = {}, dayProfitMap = {};
 
   data.forEach(r => {
     const st = String(r.status || '');
@@ -525,6 +525,7 @@ async function getDashboard2(auth, filter) {
       const om = num(r.total), bj = num(r.biaya_jasa), bs = num(r.biaya_sparepart);
       totalOmset += om; jasaRevenue += bj; biayaSparepart += bs;
       dayOmsetMap[key] = (dayOmsetMap[key] || 0) + om;
+      dayProfitMap[key] = (dayProfitMap[key] || 0) + (om - bs);
     }
   });
 
@@ -538,6 +539,7 @@ async function getDashboard2(auth, filter) {
     labels = Array.from({ length: lastDay }, (_, i) => String(i + 1));
   }
   const dayOmset = labels.map(k => dayOmsetMap[k] || 0);
+  const dayProfit = labels.map(k => dayProfitMap[k] || 0);
 
   const recentTickets = data.filter(r => FINISHED[String(r.status || '')]).slice(-10).map(r => ({
     id: r.id || '', tanggal: ymd(r.tanggal), nama: r.nama || '', status: r.status || ''
@@ -547,8 +549,9 @@ async function getDashboard2(auth, filter) {
   if (hasRange) totalExpense = await sumExpense(cabFilter, t => { if (!t) return false; const d = new Date(t); return (!from || d >= from) && (!to || d <= to); });
   else totalExpense = await sumExpense(cabFilter, t => ym(t) === ymSel);
 
+  const totalProfit = totalOmset - biayaSparepart;   // profit kotor dari sparepart
   const netRevenue = jasaRevenue - totalExpense;
-  return { ym: ymSel, statusAgg, totalOmset, jasaRevenue, biayaSparepart, totalExpense, netRevenue, days: labels, dayOmset, recentTickets };
+  return { ym: ymSel, statusAgg, totalOmset, jasaRevenue, biayaSparepart, totalProfit, totalExpense, netRevenue, days: labels, dayOmset, dayProfit, recentTickets };
 }
 
 /* =========================================================
@@ -917,8 +920,7 @@ async function adminDeleteUser(id, auth) {
 }
 
 // ---- BAGI HASIL (laporan per teknisi) ----
-async function getBagiHasil(filter, auth) {
-  requireAdmin(auth);
+async function _computeBagiHasil(filter) {
   filter = filter || {};
   const cabFilter = norm(filter.cabang);
   const hasRange = !!(filter.dateFrom || filter.dateTo);
@@ -963,6 +965,31 @@ async function getBagiHasil(filter, auth) {
   });
   return { period: hasRange ? (ymd(from) + ' s/d ' + ymd(to)) : ymSel, rows: list };
 }
+async function getBagiHasil(filter, auth) {
+  requireAdmin(auth);
+  return _computeBagiHasil(filter);
+}
+async function exportBagiHasilExcel(filter, auth) {
+  requireAdmin(auth);
+  const data = await _computeBagiHasil(filter);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('BAGI HASIL');
+  ws.addRow(['Periode', data.period]);
+  ws.addRow([]);
+  ws.addRow(['Teknisi', 'Cabang', 'Tipe Bayar', 'Jml Tiket', 'Omset', 'Sparepart', 'Profit', 'Persen (%)', 'Gaji', 'Dibayar']);
+  ws.getRow(3).font = { bold: true };
+  let tot = 0;
+  data.rows.forEach(r => {
+    tot += num(r.totalDibayar);
+    ws.addRow([r.nama, r.cabang, (r.tipeBayar === 'gaji' ? 'Gaji' : 'Bagi Hasil'), r.jumlahTiket,
+      num(r.totalOmset), num(r.totalSparepart), num(r.profit), num(r.persen), num(r.gaji), num(r.totalDibayar)]);
+  });
+  ws.addRow([]);
+  ws.addRow(['', '', '', '', '', '', '', '', 'TOTAL DIBAYAR', tot]).font = { bold: true };
+  ws.columns.forEach(c => { let m = 10; c.eachCell(cell => { m = Math.max(m, String(cell.value == null ? '' : cell.value).length + 2); }); c.width = Math.min(m, 40); });
+  const buf = await wb.xlsx.writeBuffer();
+  return { b64: Buffer.from(buf).toString('base64'), filename: `BAGI_HASIL_${data.period.replace(/[^\w-]/g, '_')}_${Date.now()}.xlsx` };
+}
 
 /* =========================================================
  * RPC DISPATCH  (menggantikan google.script.run)
@@ -1004,7 +1031,8 @@ const HANDLERS = {
   adminListUsers: (a, auth) => adminListUsers(auth),
   adminSaveUser: (a, auth) => adminSaveUser(a[0], auth),
   adminDeleteUser: (a, auth) => adminDeleteUser(a[0], auth),
-  getBagiHasil: (a, auth) => getBagiHasil(a[0], auth)
+  getBagiHasil: (a, auth) => getBagiHasil(a[0], auth),
+  exportBagiHasilExcel: (a, auth) => exportBagiHasilExcel(a[0], auth)
 };
 
 /* =========================================================
