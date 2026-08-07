@@ -27,27 +27,43 @@
       }
       return data.result;
     }
+    // Whitelist metode RPC (eksplisit, tanpa dispatch dinamis).
+    var METHODS = [
+      'authLogin', 'listCabang', 'listBranches', 'listTechnicians',
+      'createTicket', 'listTicketsWithCounts', 'updateTicketStatus', 'getTicket',
+      'updateTicket', 'getTicketImages', 'addTicketPhotos', 'deleteTicketPhoto',
+      'addFinance', 'listFinance', 'getFinance', 'updateFinance',
+      'getDashboard2', 'exportTicketsExcel', 'buildNotifMessage',
+      'getQC', 'saveQC', 'generateTicketHTML', 'generateQCPrintHTML'
+    ];
     function makeBuilder() {
       var onSuccess = null, onFailure = null;
-      var builder = new Proxy(function () {}, {
-        get: function (_t, prop) {
-          if (prop === 'withSuccessHandler') return function (fn) { onSuccess = fn; return builder; };
-          if (prop === 'withFailureHandler') return function (fn) { onFailure = fn; return builder; };
-          if (prop === 'withUserObject') return function () { return builder; };
-          // selain itu: nama metode RPC
-          return function () {
-            var args = Array.prototype.slice.call(arguments);
-            callRpc(String(prop), args)
-              .then(function (res) { if (onSuccess) onSuccess(res); })
-              .catch(function (err) { if (onFailure) onFailure(err); else console.error(err); });
-          };
-        }
+      var builder = {
+        withSuccessHandler: function (fn) { onSuccess = fn; return builder; },
+        withFailureHandler: function (fn) { onFailure = fn; return builder; },
+        withUserObject: function () { return builder; }
+      };
+      METHODS.forEach(function (name) {
+        builder[name] = function () {
+          var args = Array.prototype.slice.call(arguments);
+          callRpc(name, args)
+            .then(function (res) { if (onSuccess) onSuccess(res); })
+            .catch(function (err) { if (onFailure) onFailure(err); else console.error(err); });
+        };
       });
       return builder;
     }
+    // Setiap awal rantai memakai builder baru.
+    var runObj = {};
+    ['withSuccessHandler', 'withFailureHandler', 'withUserObject'].concat(METHODS).forEach(function (name) {
+      Object.defineProperty(runObj, name, {
+        enumerable: true,
+        get: function () { return makeBuilder()[name]; }
+      });
+    });
     window.google = window.google || {};
     window.google.script = {
-      run: new Proxy({}, { get: function (_t, prop) { return makeBuilder()[prop]; } }),
+      run: runObj,
       host: { close: function () {}, setHeight: function () {}, setWidth: function () {} }
     };
   })();
@@ -1120,16 +1136,25 @@ $('btnExportDash').addEventListener('click', ()=>{
 });
 
 /* ========= CETAK ========= */
+// Muat dokumen HTML cetak (dari server) ke window via Blob URL (navigasi ke object URL).
+function renderPrintTo(w, html){
+  if(!w) return;
+  const url = URL.createObjectURL(new Blob([html], {type:'text/html'}));
+  w.location.href = url;
+  w.focus();
+  setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000);
+}
 window.printTicket = (id,kind,btn)=>{
   if(!AUTH) return showLogin(true);
   const unlock = lockBtn(btn,'Mencetak…');
+  const w = window.open('', '_blank', 'width=480,height=900');
   google.script.run
     .withSuccessHandler(html=>{
-      const w = window.open('', '_blank', 'width=480,height=900');
-      w.document.open(); w.document.write(html); w.document.close(); w.focus();
+      renderPrintTo(w, html);
       unlock && unlock();
     })
     .withFailureHandler(e=>{
+      if(w){ try{ w.close(); }catch(_){} }
       alert('Gagal cetak: '+e.message); unlock && unlock();
     })
     .generateTicketHTML(id, kind);
@@ -1489,7 +1514,7 @@ $('qc_print').addEventListener('click', ()=>{
   const unlock = lockBtn($('qc_print'),'Mencetak…');
   google.script.run
     .withSuccessHandler(html=>{
-      if(w){ w.document.open(); w.document.write(html); w.document.close(); w.focus(); }
+      renderPrintTo(w, html);
       unlock();
     })
     .withFailureHandler(e=>{
