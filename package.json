@@ -1,0 +1,18 @@
+{
+  "name": "repair-center",
+  "version": "1.0.0",
+  "description": "REPAIR CENTER - sistem ticketing servis HP multi-cabang (migrasi dari Google Apps Script ke Node.js + PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.637.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}
