@@ -1007,6 +1007,12 @@ function setUserbar(){
   show($('dash_cabang_wrap'), on);
   const adminBtn = $('tabAdminBtn');
   if(adminBtn) adminBtn.style.display = on ? '' : 'none';
+  // Non-admin: pastikan section Admin tidak nyangkut tampil (mis. saat ganti akun)
+  if(!on){
+    const sec = $('tab-admin');
+    if(sec && sec.style.display!=='none' && typeof goToTab==='function') goToTab('tiket');
+    else if(sec) sec.style.display='none';
+  }
   if(on) loadBranches();
 }
 
@@ -1026,6 +1032,7 @@ $('lg_submit').addEventListener('click', ()=>{
   google.script.run.withSuccessHandler(u=>{
     AUTH=u; localStorage.setItem('auth', JSON.stringify(u));
     setUserbar(); showLogin(false); $('app').style.display='block';
+    goToTab('tiket');            // selalu mulai dari tab default (hindari section admin nyangkut)
     initAfterLogin();
     unlock();
   }).withFailureHandler(e=>{
@@ -1073,17 +1080,22 @@ window.addEventListener('load', ()=>{
 $('btnDiag').addEventListener('click', ()=> alert('OK • REPAIR CENTER • Theme:'+root.className+' • User:'+(AUTH?AUTH.email:'(none)')));
 
 /* ========= TABS ========= */
+function goToTab(name){
+  // guard: tab admin hanya untuk admin
+  if(name==='admin' && !(AUTH && AUTH.isAdmin)) name='tiket';
+  document.querySelectorAll('.tab').forEach(x=> x.classList.toggle('active', x.dataset.tab===name));
+  document.querySelectorAll('section[id^="tab-"]').forEach(s=> s.style.display = (s.id==='tab-'+name)?'block':'none');
+  if(name==='list') loadTicketsUI();
+  if(name==='keu'){ loadFinance(); $('k_tgl').value = todayYMD(); }
+  if(name==='dash') loadDashboard();
+  if(name==='admin' && window.loadAdminAll) window.loadAdminAll();
+}
 document.querySelectorAll('.tab').forEach(b=>{
   b.addEventListener('click',()=>{
     if(!AUTH) return showLogin(true);
-    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
-    document.querySelectorAll('section[id^="tab-"]').forEach(s=> s.style.display='none');
     const id=b.dataset.tab;
-    $('tab-'+id).style.display='block';
-    if(id==='list') loadTicketsUI();
-    if(id==='keu'){ loadFinance(); $('k_tgl').value = todayYMD(); }
-    if(id==='dash') loadDashboard();
+    if(id==='admin' && !AUTH.isAdmin) return;   // staff tidak boleh
+    goToTab(id);
   });
 });
 
@@ -2001,8 +2013,7 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
     loadUsersAdmin();
     setTimeout(loadBagiHasil, 300); // setelah cabang termuat
   };
-  const adminBtn = $('tabAdminBtn');
-  if(adminBtn) adminBtn.addEventListener('click', ()=> window.loadAdminAll());
+  // Pemuatan data admin dipicu oleh goToTab('admin') di handler tab utama.
 })();
 </script>
 </body>
