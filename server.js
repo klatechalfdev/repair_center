@@ -816,6 +816,154 @@ async function generateQCPrintHTML(ticketId) {
 }
 
 /* =========================================================
+ * ADMIN: kelola Cabang / Teknisi / User + Bagi Hasil
+ * Semua handler di bawah WAJIB admin (requireAdmin).
+ * =======================================================*/
+function requireAdmin(auth) { if (!auth || !auth.isAdmin) throw new Error('Khusus admin.'); }
+
+// ---- CABANG ----
+async function adminListCabang(auth) {
+  requireAdmin(auth);
+  const { rows } = await pool.query('SELECT * FROM cabang ORDER BY kode');
+  return rows.map(r => ({ kode: r.kode || '', nama: r.nama || '', aktif: !!r.aktif, mapsUrl: r.maps_url || '', reviewUrl: r.review_url || '', phone: r.phone || '' }));
+}
+async function adminSaveCabang(payload, auth) {
+  requireAdmin(auth);
+  payload = payload || {};
+  const kode = String(payload.kode || '').trim();
+  if (!kode) throw new Error('Kode cabang wajib.');
+  if (!String(payload.nama || '').trim()) throw new Error('Nama cabang wajib.');
+  await pool.query(
+    `INSERT INTO cabang (kode,nama,aktif,maps_url,review_url,phone) VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (kode) DO UPDATE SET nama=EXCLUDED.nama, aktif=EXCLUDED.aktif, maps_url=EXCLUDED.maps_url, review_url=EXCLUDED.review_url, phone=EXCLUDED.phone`,
+    [kode, String(payload.nama).trim(), payload.aktif !== false, payload.mapsUrl || '', payload.reviewUrl || '', payload.phone || '']
+  );
+  return { ok: true, kode };
+}
+async function adminDeleteCabang(kode, auth) {
+  requireAdmin(auth);
+  if (!kode) throw new Error('Kode wajib.');
+  await pool.query('DELETE FROM cabang WHERE kode=$1', [String(kode)]);
+  return { ok: true };
+}
+
+// ---- TEKNISI ----
+function mapTeknisi(r) {
+  return { id: r.id, cabang: r.cabang || '', nama: r.nama || '', hp: r.hp || '', tipeBayar: r.tipe_bayar || 'bagihasil', gaji: num(r.gaji), bagiHasil: num(r.bagi_hasil) };
+}
+async function adminListTeknisi(auth) {
+  requireAdmin(auth);
+  const { rows } = await pool.query('SELECT * FROM teknisi ORDER BY cabang, nama');
+  return rows.map(mapTeknisi);
+}
+async function adminSaveTeknisi(payload, auth) {
+  requireAdmin(auth);
+  payload = payload || {};
+  if (!String(payload.nama || '').trim()) throw new Error('Nama teknisi wajib.');
+  const tipe = (String(payload.tipeBayar || 'bagihasil') === 'gaji') ? 'gaji' : 'bagihasil';
+  const gaji = num(payload.gaji || 0);
+  const bagiHasil = num(payload.bagiHasil || 0);
+  const cabang = String(payload.cabang || '').trim();
+  const nama = String(payload.nama).trim();
+  const hp = String(payload.hp || '').trim();
+  if (payload.id) {
+    await pool.query('UPDATE teknisi SET cabang=$1,nama=$2,hp=$3,tipe_bayar=$4,gaji=$5,bagi_hasil=$6 WHERE id=$7',
+      [cabang, nama, hp, tipe, gaji, bagiHasil, Number(payload.id)]);
+    return { ok: true, id: Number(payload.id) };
+  }
+  const { rows } = await pool.query('INSERT INTO teknisi (cabang,nama,hp,tipe_bayar,gaji,bagi_hasil) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [cabang, nama, hp, tipe, gaji, bagiHasil]);
+  return { ok: true, id: rows[0].id };
+}
+async function adminDeleteTeknisi(id, auth) {
+  requireAdmin(auth);
+  if (!id) throw new Error('ID wajib.');
+  await pool.query('DELETE FROM teknisi WHERE id=$1', [Number(id)]);
+  return { ok: true };
+}
+
+// ---- USER ----
+async function adminListUsers(auth) {
+  requireAdmin(auth);
+  const { rows } = await pool.query('SELECT id,email,pin,nama,cabang,cabang_nama,role FROM users ORDER BY id');
+  return rows.map(u => ({ id: u.id, email: u.email || '', pin: u.pin || '', nama: u.nama || '', cabang: u.cabang || '', cabangNama: u.cabang_nama || '', role: u.role || 'staff' }));
+}
+async function adminSaveUser(payload, auth) {
+  requireAdmin(auth);
+  payload = payload || {};
+  const email = String(payload.email || '').trim();
+  const pin = String(payload.pin || '').trim();
+  const nama = String(payload.nama || '').trim();
+  if (!nama) throw new Error('Nama user wajib.');
+  if (!email && !pin) throw new Error('Isi minimal Email atau PIN.');
+  const cabang = String(payload.cabang || '').trim();
+  const cabangNama = String(payload.cabangNama || '').trim();
+  const role = String(payload.role || 'staff').trim() || 'staff';
+  if (payload.id) {
+    await pool.query('UPDATE users SET email=$1,pin=$2,nama=$3,cabang=$4,cabang_nama=$5,role=$6 WHERE id=$7',
+      [email, pin, nama, cabang, cabangNama, role, Number(payload.id)]);
+    return { ok: true, id: Number(payload.id) };
+  }
+  const { rows } = await pool.query('INSERT INTO users (email,pin,nama,cabang,cabang_nama,role) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [email, pin, nama, cabang, cabangNama, role]);
+  return { ok: true, id: rows[0].id };
+}
+async function adminDeleteUser(id, auth) {
+  requireAdmin(auth);
+  if (!id) throw new Error('ID wajib.');
+  if (Number(id) === Number(auth.id)) throw new Error('Tidak bisa menghapus akun sendiri.');
+  await pool.query('DELETE FROM users WHERE id=$1', [Number(id)]);
+  return { ok: true };
+}
+
+// ---- BAGI HASIL (laporan per teknisi) ----
+async function getBagiHasil(filter, auth) {
+  requireAdmin(auth);
+  filter = filter || {};
+  const cabFilter = norm(filter.cabang);
+  const hasRange = !!(filter.dateFrom || filter.dateTo);
+  const ymSel = String(filter.month || (hasRange ? '' : ym(new Date())));
+  const from = hasRange ? new Date((filter.dateFrom || ymd(new Date())) + 'T00:00:00') : null;
+  const to = hasRange ? new Date((filter.dateTo || ymd(new Date())) + 'T23:59:59') : null;
+
+  // Tiket yang sudah dikerjakan (Selesai/Diambil) pada periode
+  const { rows: tickets } = await pool.query('SELECT teknisi, status, tanggal, biaya_jasa, total, cabang FROM tiket');
+  const DONE = { 'Selesai': true, 'Diambil': true };
+  const agg = {}; // key: norm(nama) -> {jumlah, jasa, omset}
+  tickets.forEach(r => {
+    if (!DONE[String(r.status || '')]) return;
+    if (cabFilter && norm(r.cabang) !== cabFilter) return;
+    const t = r.tanggal; if (!t) return;
+    if (hasRange) { const dd = new Date(t); if (from && dd < from) return; if (to && dd > to) return; }
+    else { if (ym(t) !== ymSel) return; }
+    const key = norm(r.teknisi);
+    if (!key) return;
+    if (!agg[key]) agg[key] = { jumlah: 0, jasa: 0, omset: 0 };
+    agg[key].jumlah++; agg[key].jasa += num(r.biaya_jasa); agg[key].omset += num(r.total);
+  });
+
+  const args = [];
+  let sql = 'SELECT * FROM teknisi';
+  if (cabFilter) { args.push(cabFilter); sql += ' WHERE lower(cabang)=$1'; }
+  sql += ' ORDER BY cabang, nama';
+  const { rows: tek } = await pool.query(sql, args);
+
+  const list = tek.map(r => {
+    const a = agg[norm(r.nama)] || { jumlah: 0, jasa: 0, omset: 0 };
+    const tipe = r.tipe_bayar || 'bagihasil';
+    const persen = num(r.bagi_hasil);
+    const gaji = num(r.gaji);
+    const bagiHasil = (tipe === 'bagihasil') ? Math.round(a.jasa * persen / 100) : 0;
+    return {
+      id: r.id, nama: r.nama || '', cabang: r.cabang || '', tipeBayar: tipe,
+      persen, gaji, jumlahTiket: a.jumlah, totalJasa: a.jasa, totalOmset: a.omset,
+      bagiHasil, totalDibayar: (tipe === 'gaji') ? gaji : bagiHasil
+    };
+  });
+  return { period: hasRange ? (ymd(from) + ' s/d ' + ymd(to)) : ymSel, rows: list };
+}
+
+/* =========================================================
  * RPC DISPATCH  (menggantikan google.script.run)
  * Auth diverifikasi SERVER-SIDE dari token; argumen auth dari
  * client diabaikan untuk keputusan otorisasi.
@@ -844,7 +992,18 @@ const HANDLERS = {
   getQC: (a, auth) => getQC(a[0]),
   saveQC: (a, auth) => saveQC(a[0], a[1], auth),
   generateTicketHTML: (a, auth) => generateTicketHTML(a[0], a[1]),
-  generateQCPrintHTML: (a, auth) => generateQCPrintHTML(a[0])
+  generateQCPrintHTML: (a, auth) => generateQCPrintHTML(a[0]),
+  // Admin
+  adminListCabang: (a, auth) => adminListCabang(auth),
+  adminSaveCabang: (a, auth) => adminSaveCabang(a[0], auth),
+  adminDeleteCabang: (a, auth) => adminDeleteCabang(a[0], auth),
+  adminListTeknisi: (a, auth) => adminListTeknisi(auth),
+  adminSaveTeknisi: (a, auth) => adminSaveTeknisi(a[0], auth),
+  adminDeleteTeknisi: (a, auth) => adminDeleteTeknisi(a[0], auth),
+  adminListUsers: (a, auth) => adminListUsers(auth),
+  adminSaveUser: (a, auth) => adminSaveUser(a[0], auth),
+  adminDeleteUser: (a, auth) => adminDeleteUser(a[0], auth),
+  getBagiHasil: (a, auth) => getBagiHasil(a[0], auth)
 };
 
 /* =========================================================

@@ -34,7 +34,10 @@
       'updateTicket', 'getTicketImages', 'addTicketPhotos', 'deleteTicketPhoto',
       'addFinance', 'listFinance', 'getFinance', 'updateFinance',
       'getDashboard2', 'exportTicketsExcel', 'buildNotifMessage',
-      'getQC', 'saveQC', 'generateTicketHTML', 'generateQCPrintHTML'
+      'getQC', 'saveQC', 'generateTicketHTML', 'generateQCPrintHTML',
+      'adminListCabang', 'adminSaveCabang', 'adminDeleteCabang',
+      'adminListTeknisi', 'adminSaveTeknisi', 'adminDeleteTeknisi',
+      'adminListUsers', 'adminSaveUser', 'adminDeleteUser', 'getBagiHasil'
     ];
     function makeBuilder() {
       var onSuccess = null, onFailure = null;
@@ -247,6 +250,7 @@
     <button class="tab" data-tab="list">Daftar Tiket</button>
     <button class="tab" data-tab="keu">Keuangan</button>
     <button class="tab" data-tab="dash">Dashboard</button>
+    <button class="tab" data-tab="admin" id="tabAdminBtn" style="display:none">⚙️ Admin</button>
   </div>
 
 <!-- Modal Kerugian Sparepart -->
@@ -480,6 +484,128 @@
         <thead><tr><th>ID</th><th>Tanggal</th><th>Pelanggan</th><th>Status</th></tr></thead>
         <tbody id="t10"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ADMIN (khusus admin) -->
+  <section id="tab-admin" class="card" style="display:none;">
+    <div class="chip-tabs" id="adminNav">
+      <button class="chip active" data-apane="teknisi">Teknisi &amp; Bagi Hasil</button>
+      <button class="chip" data-apane="cabang">Cabang</button>
+      <button class="chip" data-apane="user">User</button>
+    </div>
+
+    <!-- ADMIN: TEKNISI -->
+    <div class="apane" id="apane-teknisi">
+      <div class="card">
+        <h4 id="tk_form_title">Tambah Teknisi</h4>
+        <input type="hidden" id="tk_id">
+        <div class="grid g3">
+          <div><label for="tk_cabang">Cabang</label><select id="tk_cabang"><option value="">(pilih)</option></select></div>
+          <div><label for="tk_nama">Nama</label><input id="tk_nama"></div>
+          <div><label for="tk_hp">No HP</label><input id="tk_hp" inputmode="numeric" placeholder="08xxx"></div>
+          <div>
+            <label for="tk_tipe">Tipe Bayar</label>
+            <select id="tk_tipe"><option value="bagihasil">Bagi Hasil (%)</option><option value="gaji">Gaji (tetap)</option></select>
+          </div>
+          <div id="tk_persen_wrap"><label for="tk_persen">Bagi Hasil (%)</label><input id="tk_persen" type="text" inputmode="numeric" placeholder="cth: 30"></div>
+          <div id="tk_gaji_wrap" style="display:none"><label for="tk_gaji">Gaji (Rp)</label><input id="tk_gaji" type="text" inputmode="numeric"></div>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:space-between">
+          <div class="row">
+            <button class="btn primary" id="tk_save">Simpan</button>
+            <button class="btn ghost" id="tk_reset">Batal Edit</button>
+          </div>
+          <span id="tk_msg" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between;align-items:flex-end">
+          <h4>Daftar Teknisi</h4>
+        </div>
+        <table>
+          <thead><tr><th>Cabang</th><th>Nama</th><th>HP</th><th>Tipe</th><th>Nilai</th><th>Aksi</th></tr></thead>
+          <tbody id="tk_rows"></tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between;align-items:flex-end;gap:12px">
+          <h4>Laporan Bagi Hasil / Gaji</h4>
+          <div class="row" style="gap:8px">
+            <div><label for="bh_month">Bulan</label><select id="bh_month" style="min-width:140px"></select></div>
+            <div><label for="bh_cabang">Cabang</label><select id="bh_cabang" style="min-width:160px"><option value="">Semua</option></select></div>
+            <div><label for="bh_from">Dari</label><input type="date" id="bh_from"></div>
+            <div><label for="bh_to">Sampai</label><input type="date" id="bh_to"></div>
+            <button class="btn" id="bh_apply">Hitung</button>
+          </div>
+        </div>
+        <div class="small-note" style="margin-top:4px">Bagi hasil dihitung dari <b>Biaya Jasa</b> tiket berstatus <b>Selesai/Diambil</b> × persen. Teknisi tipe Gaji tampil nominal tetap. Jika range diisi, filter bulan diabaikan.</div>
+        <table style="margin-top:8px">
+          <thead><tr><th>Teknisi</th><th>Cabang</th><th>Tipe</th><th>Jml Tiket</th><th>Total Jasa</th><th>Persen/Gaji</th><th>Dibayar</th></tr></thead>
+          <tbody id="bh_rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADMIN: CABANG -->
+    <div class="apane" id="apane-cabang" style="display:none">
+      <div class="card">
+        <h4 id="cb_form_title">Tambah Cabang</h4>
+        <input type="hidden" id="cb_edit" value="0">
+        <div class="grid g3">
+          <div><label for="cb_kode">Kode Cabang</label><input id="cb_kode" placeholder="cth: CAB-2"></div>
+          <div><label for="cb_nama">Nama Cabang</label><input id="cb_nama"></div>
+          <div><label for="cb_phone">Telepon</label><input id="cb_phone" inputmode="numeric"></div>
+          <div><label for="cb_maps">Maps URL</label><input id="cb_maps" placeholder="https://maps.app.goo.gl/..."></div>
+          <div><label for="cb_review">Review URL</label><input id="cb_review" placeholder="https://g.page/r/..."></div>
+          <div><label for="cb_aktif">Aktif</label><select id="cb_aktif"><option value="1">Ya</option><option value="0">Tidak</option></select></div>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:space-between">
+          <div class="row">
+            <button class="btn primary" id="cb_save">Simpan</button>
+            <button class="btn ghost" id="cb_reset">Batal Edit</button>
+          </div>
+          <span id="cb_msg" class="muted"></span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <h4>Daftar Cabang</h4>
+        <table>
+          <thead><tr><th>Kode</th><th>Nama</th><th>Telepon</th><th>Aktif</th><th>Aksi</th></tr></thead>
+          <tbody id="cb_rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADMIN: USER -->
+    <div class="apane" id="apane-user" style="display:none">
+      <div class="card">
+        <h4 id="us_form_title">Tambah User</h4>
+        <input type="hidden" id="us_id">
+        <div class="grid g3">
+          <div><label for="us_nama">Nama</label><input id="us_nama"></div>
+          <div><label for="us_email">Email</label><input id="us_email" placeholder="user@contoh.com"></div>
+          <div><label for="us_pin">PIN</label><input id="us_pin" inputmode="numeric" placeholder="cth: 1234"></div>
+          <div><label for="us_cabang">Cabang</label><select id="us_cabang"><option value="">(pilih)</option></select></div>
+          <div><label for="us_role">Role</label><select id="us_role"><option value="staff">staff</option><option value="admin">admin</option></select></div>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:space-between">
+          <div class="row">
+            <button class="btn primary" id="us_save">Simpan</button>
+            <button class="btn ghost" id="us_reset">Batal Edit</button>
+          </div>
+          <span id="us_msg" class="muted"></span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <h4>Daftar User</h4>
+        <table>
+          <thead><tr><th>Nama</th><th>Email</th><th>PIN</th><th>Cabang</th><th>Role</th><th>Aksi</th></tr></thead>
+          <tbody id="us_rows"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 </div>
@@ -841,8 +967,8 @@ function loadBranches(){
     sel.appendChild(def);
     (arr||[]).forEach(b=>{
       const o=document.createElement('option');
-     o.value = b.nama || b.name || b.CabangNama || b.cabang || b.kode || b.id || b.ID || '';
-     o.textContent = o.value;
+     o.value = b.kode || b.cabang || b.id || '';
+     o.textContent = (b.nama || b.kode || o.value) + (b.kode && b.nama ? ' ('+b.kode+')' : '');
       sel.appendChild(o);
     });
     if(cur && [...sel.options].some(o=>o.value===cur)) sel.value=cur;
@@ -866,6 +992,8 @@ function setUserbar(){
   show($('cabangFilterWrap'), on);
   show($('keu_cabang_wrap'), on);
   show($('dash_cabang_wrap'), on);
+  const adminBtn = $('tabAdminBtn');
+  if(adminBtn) adminBtn.style.display = on ? '' : 'none';
   if(on) loadBranches();
 }
 
@@ -1617,6 +1745,222 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
   window.showKerugianModal = showKerugianModal;
   window.closeKerugianModal = closeKerugianModal;
   window.openFormKeuanganFromKerugian = openFormKeuanganFromKerugian;
+</script>
+
+<!-- ========= ADMIN (khusus admin) ========= -->
+<script>
+(function(){
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g, x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[x]));
+  const tipeLabel = t => (t==='gaji' ? 'Gaji' : 'Bagi Hasil');
+
+  // cache cabang list (kode+nama) untuk select
+  let CB_CACHE = [];
+  function fillCabangSelect(sel, withSemua){
+    if(!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = withSemua ? '<option value="">Semua</option>' : '<option value="">(pilih)</option>';
+    CB_CACHE.forEach(c=>{
+      const o=document.createElement('option');
+      o.value=c.kode; o.textContent=(c.nama||c.kode)+' ('+c.kode+')';
+      sel.appendChild(o);
+    });
+    if(cur && [...sel.options].some(o=>o.value===cur)) sel.value=cur;
+  }
+
+  /* ---------- sub-nav ---------- */
+  function showPane(name){
+    document.querySelectorAll('#tab-admin .apane').forEach(p=> p.style.display='none');
+    const pane = $('apane-'+name); if(pane) pane.style.display='block';
+    document.querySelectorAll('#adminNav .chip').forEach(c=> c.classList.toggle('active', c.dataset.apane===name));
+  }
+  document.querySelectorAll('#adminNav .chip').forEach(c=>{
+    c.addEventListener('click', ()=> showPane(c.dataset.apane));
+  });
+
+  /* ---------- TEKNISI ---------- */
+  function tkToggleTipe(){
+    const gaji = $('tk_tipe').value==='gaji';
+    $('tk_gaji_wrap').style.display = gaji ? 'block':'none';
+    $('tk_persen_wrap').style.display = gaji ? 'none':'block';
+  }
+  function tkReset(){
+    $('tk_id').value=''; $('tk_cabang').value=''; $('tk_nama').value=''; $('tk_hp').value='';
+    $('tk_tipe').value='bagihasil'; $('tk_persen').value=''; $('tk_gaji').value='';
+    $('tk_form_title').textContent='Tambah Teknisi'; $('tk_msg').textContent=''; tkToggleTipe();
+  }
+  function loadTeknisiAdmin(){
+    const tb=$('tk_rows'); tb.innerHTML='<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    google.script.run.withSuccessHandler(list=>{
+      tb.innerHTML='';
+      if(!list.length){ tb.innerHTML='<tr><td colspan="6" class="empty">Belum ada teknisi.</td></tr>'; return; }
+      list.forEach(t=>{
+        const nilai = t.tipeBayar==='gaji' ? fmtIDR(t.gaji) : (t.bagiHasil+'%');
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${esc(t.cabang)}</td><td>${esc(t.nama)}</td><td>${esc(t.hp)}</td>
+          <td>${tipeLabel(t.tipeBayar)}</td><td>${nilai}</td>
+          <td><button class="btn small" data-edit='${JSON.stringify(t).replace(/'/g,"&#39;")}'>Edit</button>
+              <button class="btn small ghost" data-del="${t.id}" data-nama="${esc(t.nama)}">Hapus</button></td>`;
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('[data-edit]').forEach(b=> b.onclick=()=>{
+        const t=JSON.parse(b.getAttribute('data-edit'));
+        $('tk_id').value=t.id; $('tk_cabang').value=t.cabang||''; $('tk_nama').value=t.nama||'';
+        $('tk_hp').value=t.hp||''; $('tk_tipe').value=t.tipeBayar||'bagihasil';
+        $('tk_persen').value=t.bagiHasil||''; $('tk_gaji').value=formatThousands(String(t.gaji||0));
+        $('tk_form_title').textContent='Edit Teknisi: '+(t.nama||''); tkToggleTipe();
+        $('tab-admin').scrollIntoView({behavior:'smooth'});
+      });
+      tb.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
+        if(!confirm('Hapus teknisi "'+b.dataset.nama+'"?')) return;
+        google.script.run.withSuccessHandler(()=>{ loadTeknisiAdmin(); loadBagiHasil(); })
+          .withFailureHandler(e=>alert('Gagal: '+e.message)).adminDeleteTeknisi(Number(b.dataset.del));
+      });
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="6" class="empty">Error: '+e.message+'</td></tr>'; }).adminListTeknisi();
+  }
+  $('tk_tipe').addEventListener('change', tkToggleTipe);
+  $('tk_reset').addEventListener('click', tkReset);
+  bindMoneyInput('tk_gaji');
+  $('tk_save').addEventListener('click', ()=>{
+    const payload={
+      id: $('tk_id').value ? Number($('tk_id').value) : null,
+      cabang: $('tk_cabang').value, nama: $('tk_nama').value.trim(), hp: $('tk_hp').value.trim(),
+      tipeBayar: $('tk_tipe').value,
+      bagiHasil: parseFloat(($('tk_persen').value||'0').replace(',','.'))||0,
+      gaji: parseIntID($('tk_gaji').value)
+    };
+    if(!payload.nama){ $('tk_msg').textContent='Nama wajib.'; return; }
+    const unlock=lockBtn($('tk_save'),'Menyimpan…'); $('tk_msg').textContent='Menyimpan...';
+    google.script.run.withSuccessHandler(()=>{ unlock(); $('tk_msg').textContent='Tersimpan.'; tkReset(); loadTeknisiAdmin(); loadBagiHasil(); loadTechnicians(); })
+      .withFailureHandler(e=>{ unlock(); $('tk_msg').textContent='Error: '+e.message; }).adminSaveTeknisi(payload);
+  });
+
+  /* ---------- BAGI HASIL ---------- */
+  function loadBagiHasil(){
+    const tb=$('bh_rows'); if(!tb) return;
+    tb.innerHTML='<tr><td colspan="7" class="muted">Loading...</td></tr>';
+    const filter={ month: $('bh_month').value, cabang: $('bh_cabang').value||'', dateFrom: $('bh_from').value||'', dateTo: $('bh_to').value||'' };
+    google.script.run.withSuccessHandler(res=>{
+      tb.innerHTML='';
+      const rows=res.rows||[];
+      if(!rows.length){ tb.innerHTML='<tr><td colspan="7" class="empty">Belum ada teknisi.</td></tr>'; return; }
+      let totBayar=0;
+      rows.forEach(r=>{
+        totBayar += r.totalDibayar||0;
+        const pg = r.tipeBayar==='gaji' ? ('Gaji '+fmtIDR(r.gaji)) : (r.persen+'%');
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${esc(r.nama)}</td><td>${esc(r.cabang)}</td><td>${tipeLabel(r.tipeBayar)}</td>
+          <td>${r.jumlahTiket}</td><td>${fmtIDR(r.totalJasa)}</td><td>${pg}</td><td><b>${fmtIDR(r.totalDibayar)}</b></td>`;
+        tb.appendChild(tr);
+      });
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td colspan="6" style="text-align:right"><b>Total Dibayar</b></td><td><b>${fmtIDR(totBayar)}</b></td>`;
+      tb.appendChild(tr);
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="7" class="empty">Error: '+e.message+'</td></tr>'; }).getBagiHasil(filter);
+  }
+  $('bh_apply').addEventListener('click', loadBagiHasil);
+  $('bh_month').addEventListener('change', ()=>{ $('bh_from').value=''; $('bh_to').value=''; loadBagiHasil(); });
+
+  /* ---------- CABANG ---------- */
+  function cbReset(){
+    $('cb_edit').value='0'; $('cb_kode').value=''; $('cb_kode').disabled=false; $('cb_nama').value='';
+    $('cb_phone').value=''; $('cb_maps').value=''; $('cb_review').value=''; $('cb_aktif').value='1';
+    $('cb_form_title').textContent='Tambah Cabang'; $('cb_msg').textContent='';
+  }
+  function loadCabangAdmin(){
+    const tb=$('cb_rows'); tb.innerHTML='<tr><td colspan="5" class="muted">Loading...</td></tr>';
+    google.script.run.withSuccessHandler(list=>{
+      CB_CACHE = list.map(c=>({kode:c.kode, nama:c.nama}));
+      fillCabangSelect($('tk_cabang'), false);
+      fillCabangSelect($('us_cabang'), false);
+      fillCabangSelect($('bh_cabang'), true);
+      tb.innerHTML='';
+      if(!list.length){ tb.innerHTML='<tr><td colspan="5" class="empty">Belum ada cabang.</td></tr>'; return; }
+      list.forEach(c=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${esc(c.kode)}</td><td>${esc(c.nama)}</td><td>${esc(c.phone)}</td>
+          <td>${c.aktif?'Ya':'Tidak'}</td>
+          <td><button class="btn small" data-edit='${JSON.stringify(c).replace(/'/g,"&#39;")}'>Edit</button>
+              <button class="btn small ghost" data-del="${esc(c.kode)}">Hapus</button></td>`;
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('[data-edit]').forEach(b=> b.onclick=()=>{
+        const c=JSON.parse(b.getAttribute('data-edit'));
+        $('cb_edit').value='1'; $('cb_kode').value=c.kode; $('cb_kode').disabled=true; $('cb_nama').value=c.nama||'';
+        $('cb_phone').value=c.phone||''; $('cb_maps').value=c.mapsUrl||''; $('cb_review').value=c.reviewUrl||'';
+        $('cb_aktif').value=c.aktif?'1':'0'; $('cb_form_title').textContent='Edit Cabang: '+c.kode; $('cb_msg').textContent='';
+      });
+      tb.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
+        if(!confirm('Hapus cabang "'+b.dataset.del+'"? (data tiket lama tetap ada)')) return;
+        google.script.run.withSuccessHandler(()=>{ loadCabangAdmin(); })
+          .withFailureHandler(e=>alert('Gagal: '+e.message)).adminDeleteCabang(b.dataset.del);
+      });
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="5" class="empty">Error: '+e.message+'</td></tr>'; }).adminListCabang();
+  }
+  $('cb_reset').addEventListener('click', cbReset);
+  $('cb_save').addEventListener('click', ()=>{
+    const payload={ kode:$('cb_kode').value.trim(), nama:$('cb_nama').value.trim(), phone:$('cb_phone').value.trim(),
+      mapsUrl:$('cb_maps').value.trim(), reviewUrl:$('cb_review').value.trim(), aktif: $('cb_aktif').value==='1' };
+    if(!payload.kode||!payload.nama){ $('cb_msg').textContent='Kode & nama wajib.'; return; }
+    const unlock=lockBtn($('cb_save'),'Menyimpan…'); $('cb_msg').textContent='Menyimpan...';
+    google.script.run.withSuccessHandler(()=>{ unlock(); $('cb_msg').textContent='Tersimpan.'; cbReset(); loadCabangAdmin(); if(AUTH&&AUTH.isAdmin) loadBranches(); })
+      .withFailureHandler(e=>{ unlock(); $('cb_msg').textContent='Error: '+e.message; }).adminSaveCabang(payload);
+  });
+
+  /* ---------- USER ---------- */
+  function usReset(){
+    $('us_id').value=''; $('us_nama').value=''; $('us_email').value=''; $('us_pin').value='';
+    $('us_cabang').value=''; $('us_role').value='staff'; $('us_form_title').textContent='Tambah User'; $('us_msg').textContent='';
+  }
+  function loadUsersAdmin(){
+    const tb=$('us_rows'); tb.innerHTML='<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    google.script.run.withSuccessHandler(list=>{
+      tb.innerHTML='';
+      if(!list.length){ tb.innerHTML='<tr><td colspan="6" class="empty">Belum ada user.</td></tr>'; return; }
+      list.forEach(u=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${esc(u.nama)}</td><td>${esc(u.email)}</td><td>${esc(u.pin)}</td><td>${esc(u.cabang)}</td><td>${esc(u.role)}</td>
+          <td><button class="btn small" data-edit='${JSON.stringify(u).replace(/'/g,"&#39;")}'>Edit</button>
+              <button class="btn small ghost" data-del="${u.id}" data-nama="${esc(u.nama)}">Hapus</button></td>`;
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('[data-edit]').forEach(b=> b.onclick=()=>{
+        const u=JSON.parse(b.getAttribute('data-edit'));
+        $('us_id').value=u.id; $('us_nama').value=u.nama||''; $('us_email').value=u.email||''; $('us_pin').value=u.pin||'';
+        $('us_cabang').value=u.cabang||''; $('us_role').value=u.role||'staff'; $('us_form_title').textContent='Edit User: '+(u.nama||'');
+      });
+      tb.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
+        if(!confirm('Hapus user "'+b.dataset.nama+'"?')) return;
+        google.script.run.withSuccessHandler(()=>{ loadUsersAdmin(); })
+          .withFailureHandler(e=>alert('Gagal: '+e.message)).adminDeleteUser(Number(b.dataset.del));
+      });
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="6" class="empty">Error: '+e.message+'</td></tr>'; }).adminListUsers();
+  }
+  $('us_reset').addEventListener('click', usReset);
+  $('us_save').addEventListener('click', ()=>{
+    const payload={ id: $('us_id').value?Number($('us_id').value):null, nama:$('us_nama').value.trim(),
+      email:$('us_email').value.trim(), pin:$('us_pin').value.trim(), cabang:$('us_cabang').value,
+      cabangNama: (CB_CACHE.find(c=>c.kode===$('us_cabang').value)||{}).nama||'', role:$('us_role').value };
+    if(!payload.nama){ $('us_msg').textContent='Nama wajib.'; return; }
+    if(!payload.email && !payload.pin){ $('us_msg').textContent='Isi email atau PIN.'; return; }
+    const unlock=lockBtn($('us_save'),'Menyimpan…'); $('us_msg').textContent='Menyimpan...';
+    google.script.run.withSuccessHandler(()=>{ unlock(); $('us_msg').textContent='Tersimpan.'; usReset(); loadUsersAdmin(); })
+      .withFailureHandler(e=>{ unlock(); $('us_msg').textContent='Error: '+e.message; }).adminSaveUser(payload);
+  });
+
+  /* ---------- loader saat tab dibuka ---------- */
+  let adminInited=false;
+  window.loadAdminAll = function(){
+    if(!AUTH || !AUTH.isAdmin) return;
+    if(!adminInited){ buildMonthOptions('bh_month'); adminInited=true; }
+    tkToggleTipe();
+    loadCabangAdmin();      // mengisi select cabang juga
+    loadTeknisiAdmin();
+    loadUsersAdmin();
+    setTimeout(loadBagiHasil, 300); // setelah cabang termuat
+  };
+  const adminBtn = $('tabAdminBtn');
+  if(adminBtn) adminBtn.addEventListener('click', ()=> window.loadAdminAll());
+})();
 </script>
 </body>
 </html>

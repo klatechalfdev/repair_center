@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS teknisi (
   cabang text,
   nama text,
   hp text,
-  bagi_hasil numeric DEFAULT 0
+  bagi_hasil numeric DEFAULT 0,       -- persen (%) untuk tipe_bayar='bagihasil'
+  tipe_bayar text DEFAULT 'bagihasil', -- 'gaji' | 'bagihasil'
+  gaji numeric DEFAULT 0               -- nominal gaji tetap untuk tipe_bayar='gaji'
 );
 
 CREATE TABLE IF NOT EXISTS tiket (
