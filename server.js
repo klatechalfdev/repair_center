@@ -927,9 +927,9 @@ async function getBagiHasil(filter, auth) {
   const to = hasRange ? new Date((filter.dateTo || ymd(new Date())) + 'T23:59:59') : null;
 
   // Tiket yang sudah dikerjakan (Selesai/Diambil) pada periode
-  const { rows: tickets } = await pool.query('SELECT teknisi, status, tanggal, biaya_jasa, total, cabang FROM tiket');
+  const { rows: tickets } = await pool.query('SELECT teknisi, status, tanggal, biaya_jasa, biaya_sparepart, total, cabang FROM tiket');
   const DONE = { 'Selesai': true, 'Diambil': true };
-  const agg = {}; // key: norm(nama) -> {jumlah, jasa, omset}
+  const agg = {}; // key: norm(nama) -> {jumlah, omset, sparepart, profit}
   tickets.forEach(r => {
     if (!DONE[String(r.status || '')]) return;
     if (cabFilter && norm(r.cabang) !== cabFilter) return;
@@ -938,8 +938,9 @@ async function getBagiHasil(filter, auth) {
     else { if (ym(t) !== ymSel) return; }
     const key = norm(r.teknisi);
     if (!key) return;
-    if (!agg[key]) agg[key] = { jumlah: 0, jasa: 0, omset: 0 };
-    agg[key].jumlah++; agg[key].jasa += num(r.biaya_jasa); agg[key].omset += num(r.total);
+    if (!agg[key]) agg[key] = { jumlah: 0, omset: 0, sparepart: 0, profit: 0 };
+    const om = num(r.total), sp = num(r.biaya_sparepart);
+    agg[key].jumlah++; agg[key].omset += om; agg[key].sparepart += sp; agg[key].profit += (om - sp);
   });
 
   const args = [];
@@ -949,14 +950,14 @@ async function getBagiHasil(filter, auth) {
   const { rows: tek } = await pool.query(sql, args);
 
   const list = tek.map(r => {
-    const a = agg[norm(r.nama)] || { jumlah: 0, jasa: 0, omset: 0 };
+    const a = agg[norm(r.nama)] || { jumlah: 0, omset: 0, sparepart: 0, profit: 0 };
     const tipe = r.tipe_bayar || 'bagihasil';
     const persen = num(r.bagi_hasil);
     const gaji = num(r.gaji);
-    const bagiHasil = (tipe === 'bagihasil') ? Math.round(a.jasa * persen / 100) : 0;
+    const bagiHasil = (tipe === 'bagihasil') ? Math.round(a.profit * persen / 100) : 0;
     return {
       id: r.id, nama: r.nama || '', cabang: r.cabang || '', tipeBayar: tipe,
-      persen, gaji, jumlahTiket: a.jumlah, totalJasa: a.jasa, totalOmset: a.omset,
+      persen, gaji, jumlahTiket: a.jumlah, totalOmset: a.omset, totalSparepart: a.sparepart, profit: a.profit,
       bagiHasil, totalDibayar: (tipe === 'gaji') ? gaji : bagiHasil
     };
   });

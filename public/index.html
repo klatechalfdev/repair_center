@@ -541,9 +541,9 @@
             <button class="btn" id="bh_apply">Hitung</button>
           </div>
         </div>
-        <div class="small-note" style="margin-top:4px">Bagi hasil dihitung dari <b>Biaya Jasa</b> tiket berstatus <b>Selesai/Diambil</b> × persen. Teknisi tipe Gaji tampil nominal tetap. Jika range diisi, filter bulan diabaikan.</div>
+        <div class="small-note" style="margin-top:4px">Bagi hasil dihitung dari <b>Profit = Total − Biaya Sparepart</b> pada tiket <b>Selesai/Diambil</b> yang dikerjakan teknisi tsb × persen. Teknisi tipe Gaji tampil nominal tetap. Jika range diisi, filter bulan diabaikan.</div>
         <table style="margin-top:8px">
-          <thead><tr><th>Teknisi</th><th>Cabang</th><th>Tipe</th><th>Jml Tiket</th><th>Total Jasa</th><th>Persen/Gaji</th><th>Dibayar</th></tr></thead>
+          <thead><tr><th>Teknisi</th><th>Cabang</th><th>Tipe</th><th>Jml Tiket</th><th>Omset</th><th>Sparepart</th><th>Profit</th><th>Persen/Gaji</th><th>Dibayar</th></tr></thead>
           <tbody id="bh_rows"></tbody>
         </table>
       </div>
@@ -1837,25 +1837,25 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
   /* ---------- BAGI HASIL ---------- */
   function loadBagiHasil(){
     const tb=$('bh_rows'); if(!tb) return;
-    tb.innerHTML='<tr><td colspan="7" class="muted">Loading...</td></tr>';
+    tb.innerHTML='<tr><td colspan="9" class="muted">Loading...</td></tr>';
     const filter={ month: $('bh_month').value, cabang: $('bh_cabang').value||'', dateFrom: $('bh_from').value||'', dateTo: $('bh_to').value||'' };
     google.script.run.withSuccessHandler(res=>{
       tb.innerHTML='';
       const rows=res.rows||[];
-      if(!rows.length){ tb.innerHTML='<tr><td colspan="7" class="empty">Belum ada teknisi.</td></tr>'; return; }
+      if(!rows.length){ tb.innerHTML='<tr><td colspan="9" class="empty">Belum ada teknisi.</td></tr>'; return; }
       let totBayar=0;
       rows.forEach(r=>{
         totBayar += r.totalDibayar||0;
         const pg = r.tipeBayar==='gaji' ? ('Gaji '+fmtIDR(r.gaji)) : (r.persen+'%');
         const tr=document.createElement('tr');
         tr.innerHTML=`<td>${esc(r.nama)}</td><td>${esc(r.cabang)}</td><td>${tipeLabel(r.tipeBayar)}</td>
-          <td>${r.jumlahTiket}</td><td>${fmtIDR(r.totalJasa)}</td><td>${pg}</td><td><b>${fmtIDR(r.totalDibayar)}</b></td>`;
+          <td>${r.jumlahTiket}</td><td>${fmtIDR(r.totalOmset)}</td><td>${fmtIDR(r.totalSparepart)}</td><td>${fmtIDR(r.profit)}</td><td>${pg}</td><td><b>${fmtIDR(r.totalDibayar)}</b></td>`;
         tb.appendChild(tr);
       });
       const tr=document.createElement('tr');
-      tr.innerHTML=`<td colspan="6" style="text-align:right"><b>Total Dibayar</b></td><td><b>${fmtIDR(totBayar)}</b></td>`;
+      tr.innerHTML=`<td colspan="8" style="text-align:right"><b>Total Dibayar</b></td><td><b>${fmtIDR(totBayar)}</b></td>`;
       tb.appendChild(tr);
-    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="7" class="empty">Error: '+e.message+'</td></tr>'; }).getBagiHasil(filter);
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="9" class="empty">Error: '+e.message+'</td></tr>'; }).getBagiHasil(filter);
   }
   $('bh_apply').addEventListener('click', loadBagiHasil);
   $('bh_month').addEventListener('change', ()=>{ $('bh_from').value=''; $('bh_to').value=''; loadBagiHasil(); });
