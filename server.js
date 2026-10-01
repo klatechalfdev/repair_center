@@ -488,6 +488,30 @@ async function sumExpense(cabNorm, predicate) {
   return rows.reduce((acc, r) => predicate(r.tanggal) ? acc + num(r.total) : acc, 0);
 }
 
+// ---- BIAYA OPERASIONAL CABANG (fixed + variable) ----
+// fixed_cost = biaya tetap per bulan (disimpan di kolom cabang.fixed_cost, sekali-set).
+// variable   = nominal per bulan (tabel cabang_var_cost: cabang+periode 'YYYY-MM').
+// Keduanya mengurangi NET sebelum bagi hasil, dialokasikan ke teknisi proporsional profit.
+function enumMonths(hasRange, from, to, ymSel) {
+  if (!hasRange) return ymSel ? [ymSel] : [];
+  const out = [];
+  const d = new Date(from.getFullYear(), from.getMonth(), 1);
+  const end = new Date(to.getFullYear(), to.getMonth(), 1);
+  while (d <= end) { out.push(ym(d)); d.setMonth(d.getMonth() + 1); }
+  return out;
+}
+async function getFixedCostMap() {
+  const { rows } = await pool.query('SELECT kode, fixed_cost FROM cabang');
+  const m = {}; rows.forEach(r => { m[norm(r.kode)] = num(r.fixed_cost); }); return m;
+}
+async function getVarCostMap(months) {
+  const m = {};
+  if (!months || !months.length) return m;
+  const { rows } = await pool.query('SELECT cabang, nilai FROM cabang_var_cost WHERE periode = ANY($1)', [months]);
+  rows.forEach(r => { const k = norm(r.cabang); m[k] = (m[k] || 0) + num(r.nilai); });
+  return m;
+}
+
 /* =========================================================
  * DASHBOARD
  * =======================================================*/
@@ -549,9 +573,26 @@ async function getDashboard2(auth, filter) {
   if (hasRange) totalExpense = await sumExpense(cabFilter, t => { if (!t) return false; const d = new Date(t); return (!from || d >= from) && (!to || d <= to); });
   else totalExpense = await sumExpense(cabFilter, t => ym(t) === ymSel);
 
+  // Biaya operasional cabang: fixed (per bulan × jumlah bulan) + variable (per bulan)
+  const months = enumMonths(hasRange, from, to, ymSel);
+  let fixedCost = 0, variableCost = 0;
+  {
+    const cabRows = (await pool.query(
+      cabFilter ? 'SELECT fixed_cost FROM cabang WHERE lower(kode)=$1' : 'SELECT fixed_cost FROM cabang',
+      cabFilter ? [cabFilter] : [])).rows;
+    cabRows.forEach(c => { fixedCost += num(c.fixed_cost) * months.length; });
+    if (months.length) {
+      const vrows = (await pool.query(
+        cabFilter ? 'SELECT nilai FROM cabang_var_cost WHERE lower(cabang)=$1 AND periode = ANY($2)'
+                  : 'SELECT nilai FROM cabang_var_cost WHERE periode = ANY($1)',
+        cabFilter ? [cabFilter, months] : [months])).rows;
+      vrows.forEach(v => { variableCost += num(v.nilai); });
+    }
+  }
+
   const totalProfit = totalOmset - biayaSparepart;   // profit kotor dari sparepart
-  const netRevenue = jasaRevenue - totalExpense;
-  return { ym: ymSel, statusAgg, totalOmset, jasaRevenue, biayaSparepart, totalProfit, totalExpense, netRevenue, days: labels, dayOmset, dayProfit, recentTickets };
+  const netRevenue = jasaRevenue - totalExpense - fixedCost - variableCost;
+  return { ym: ymSel, statusAgg, totalOmset, jasaRevenue, biayaSparepart, totalProfit, totalExpense, fixedCost, variableCost, netRevenue, days: labels, dayOmset, dayProfit, recentTickets };
 }
 
 /* =========================================================
@@ -828,7 +869,7 @@ function requireAdmin(auth) { if (!auth || !auth.isAdmin) throw new Error('Khusu
 async function adminListCabang(auth) {
   requireAdmin(auth);
   const { rows } = await pool.query('SELECT * FROM cabang ORDER BY kode');
-  return rows.map(r => ({ kode: r.kode || '', nama: r.nama || '', aktif: !!r.aktif, mapsUrl: r.maps_url || '', reviewUrl: r.review_url || '', phone: r.phone || '' }));
+  return rows.map(r => ({ kode: r.kode || '', nama: r.nama || '', aktif: !!r.aktif, mapsUrl: r.maps_url || '', reviewUrl: r.review_url || '', phone: r.phone || '', fixedCost: num(r.fixed_cost) }));
 }
 async function adminSaveCabang(payload, auth) {
   requireAdmin(auth);
@@ -837,11 +878,42 @@ async function adminSaveCabang(payload, auth) {
   if (!kode) throw new Error('Kode cabang wajib.');
   if (!String(payload.nama || '').trim()) throw new Error('Nama cabang wajib.');
   await pool.query(
-    `INSERT INTO cabang (kode,nama,aktif,maps_url,review_url,phone) VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (kode) DO UPDATE SET nama=EXCLUDED.nama, aktif=EXCLUDED.aktif, maps_url=EXCLUDED.maps_url, review_url=EXCLUDED.review_url, phone=EXCLUDED.phone`,
-    [kode, String(payload.nama).trim(), payload.aktif !== false, payload.mapsUrl || '', payload.reviewUrl || '', payload.phone || '']
+    `INSERT INTO cabang (kode,nama,aktif,maps_url,review_url,phone,fixed_cost) VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (kode) DO UPDATE SET nama=EXCLUDED.nama, aktif=EXCLUDED.aktif, maps_url=EXCLUDED.maps_url, review_url=EXCLUDED.review_url, phone=EXCLUDED.phone, fixed_cost=EXCLUDED.fixed_cost`,
+    [kode, String(payload.nama).trim(), payload.aktif !== false, payload.mapsUrl || '', payload.reviewUrl || '', payload.phone || '', num(payload.fixedCost || 0)]
   );
   return { ok: true, kode };
+}
+
+// ---- BIAYA VARIABLE per cabang/bulan ----
+async function adminListVarCost(auth) {
+  requireAdmin(auth);
+  const { rows } = await pool.query('SELECT cabang, periode, nilai FROM cabang_var_cost ORDER BY periode DESC, cabang');
+  return rows.map(r => ({ cabang: r.cabang || '', periode: r.periode || '', nilai: num(r.nilai) }));
+}
+async function adminSaveVarCost(payload, auth) {
+  requireAdmin(auth);
+  payload = payload || {};
+  const cabang = String(payload.cabang || '').trim();
+  const periode = String(payload.periode || '').trim();
+  if (!cabang) throw new Error('Cabang wajib.');
+  if (!/^\d{4}-\d{2}$/.test(periode)) throw new Error('Periode wajib format YYYY-MM.');
+  const nilai = num(payload.nilai || 0);
+  await pool.query(
+    `INSERT INTO cabang_var_cost (cabang,periode,nilai) VALUES ($1,$2,$3)
+     ON CONFLICT (cabang,periode) DO UPDATE SET nilai=EXCLUDED.nilai`,
+    [cabang, periode, nilai]
+  );
+  return { ok: true };
+}
+async function adminDeleteVarCost(payload, auth) {
+  requireAdmin(auth);
+  payload = payload || {};
+  const cabang = String(payload.cabang || '').trim();
+  const periode = String(payload.periode || '').trim();
+  if (!cabang || !periode) throw new Error('Cabang & periode wajib.');
+  await pool.query('DELETE FROM cabang_var_cost WHERE cabang=$1 AND periode=$2', [cabang, periode]);
+  return { ok: true };
 }
 async function adminDeleteCabang(kode, auth) {
   requireAdmin(auth);
@@ -963,23 +1035,30 @@ async function _computeBagiHasil(filter) {
     if (!ck) continue;
     expenseByCab[ck] = await sumExpense(ck, inPeriod);
   }
+  // Biaya operasional cabang: fixed (per bulan × jumlah bulan) + variable (per bulan)
+  const months = enumMonths(hasRange, from, to, ymSel);
+  const fixedMap = await getFixedCostMap();
+  const varMap = await getVarCostMap(months);
 
   const list = tek.map(r => {
     const a = agg[norm(r.nama)] || { jumlah: 0, omset: 0, sparepart: 0, profit: 0 };
     const tipe = r.tipe_bayar || 'bagihasil';
     const persen = num(r.bagi_hasil);
     const gaji = num(r.gaji);
-    // Alokasikan pengeluaran cabang ke teknisi proporsional terhadap profit-nya.
-    // (Untuk cabang 1 teknisi, seluruh pengeluaran jatuh ke teknisi tsb.)
+    // Alokasikan biaya cabang ke teknisi proporsional terhadap profit-nya.
+    // (Untuk cabang 1 teknisi, seluruh biaya jatuh ke teknisi tsb.)
     const ck = norm(r.cabang);
     const cabTot = cabProfit[ck] || 0;
-    const pengeluaran = (cabTot > 0) ? Math.round((expenseByCab[ck] || 0) * (a.profit / cabTot)) : 0;
-    const profitBersih = a.profit - pengeluaran;
+    const share = (cabTot > 0) ? (a.profit / cabTot) : 0;
+    const pengeluaran = Math.round((expenseByCab[ck] || 0) * share);
+    const fixedCost = Math.round(((fixedMap[ck] || 0) * months.length) * share);
+    const variableCost = Math.round((varMap[ck] || 0) * share);
+    const profitBersih = a.profit - pengeluaran - fixedCost - variableCost;
     const bagiHasil = (tipe === 'bagihasil') ? Math.round(profitBersih * persen / 100) : 0;
     return {
       id: r.id, nama: r.nama || '', cabang: r.cabang || '', tipeBayar: tipe,
       persen, gaji, jumlahTiket: a.jumlah, totalOmset: a.omset, totalSparepart: a.sparepart,
-      profit: a.profit, pengeluaran, profitBersih,
+      profit: a.profit, pengeluaran, fixedCost, variableCost, profitBersih,
       bagiHasil, totalDibayar: (tipe === 'gaji') ? gaji : bagiHasil
     };
   });
@@ -996,18 +1075,19 @@ async function exportBagiHasilExcel(filter, auth) {
   const ws = wb.addWorksheet('BAGI HASIL');
   ws.addRow(['Periode', data.period]);
   ws.addRow([]);
-  ws.addRow(['Teknisi', 'Cabang', 'Tipe Bayar', 'Jml Tiket', 'Omset', 'Sparepart', 'Profit', 'Pengeluaran', 'Net', 'Persen (%)', 'Gaji', 'Dibayar']);
+  ws.addRow(['Teknisi', 'Cabang', 'Tipe Bayar', 'Jml Tiket', 'Omset', 'Sparepart', 'Profit', 'Pengeluaran', 'Fixed', 'Variable', 'Net', 'Persen (%)', 'Gaji', 'Dibayar']);
   ws.getRow(3).font = { bold: true };
   let tot = 0;
   data.rows.forEach(r => {
     tot += num(r.totalDibayar);
     ws.addRow([r.nama, r.cabang, (r.tipeBayar === 'gaji' ? 'Gaji' : 'Bagi Hasil'), r.jumlahTiket,
       num(r.totalOmset), num(r.totalSparepart), num(r.profit), num(r.pengeluaran),
-      (r.profitBersih != null ? num(r.profitBersih) : num(r.profit) - num(r.pengeluaran)),
+      num(r.fixedCost), num(r.variableCost),
+      (r.profitBersih != null ? num(r.profitBersih) : num(r.profit) - num(r.pengeluaran) - num(r.fixedCost) - num(r.variableCost)),
       num(r.persen), num(r.gaji), num(r.totalDibayar)]);
   });
   ws.addRow([]);
-  ws.addRow(['', '', '', '', '', '', '', '', '', '', 'TOTAL DIBAYAR', tot]).font = { bold: true };
+  ws.addRow(['', '', '', '', '', '', '', '', '', '', '', '', 'TOTAL DIBAYAR', tot]).font = { bold: true };
   ws.columns.forEach(c => { let m = 10; c.eachCell(cell => { m = Math.max(m, String(cell.value == null ? '' : cell.value).length + 2); }); c.width = Math.min(m, 40); });
   const buf = await wb.xlsx.writeBuffer();
   return { b64: Buffer.from(buf).toString('base64'), filename: `BAGI_HASIL_${data.period.replace(/[^\w-]/g, '_')}_${Date.now()}.xlsx` };
@@ -1047,6 +1127,9 @@ const HANDLERS = {
   adminListCabang: (a, auth) => adminListCabang(auth),
   adminSaveCabang: (a, auth) => adminSaveCabang(a[0], auth),
   adminDeleteCabang: (a, auth) => adminDeleteCabang(a[0], auth),
+  adminListVarCost: (a, auth) => adminListVarCost(auth),
+  adminSaveVarCost: (a, auth) => adminSaveVarCost(a[0], auth),
+  adminDeleteVarCost: (a, auth) => adminDeleteVarCost(a[0], auth),
   adminListTeknisi: (a, auth) => adminListTeknisi(auth),
   adminSaveTeknisi: (a, auth) => adminSaveTeknisi(a[0], auth),
   adminDeleteTeknisi: (a, auth) => adminDeleteTeknisi(a[0], auth),

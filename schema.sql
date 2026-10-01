@@ -6,7 +6,16 @@ CREATE TABLE IF NOT EXISTS cabang (
   aktif boolean DEFAULT true,
   maps_url text DEFAULT '',
   review_url text DEFAULT '',
-  phone text DEFAULT ''
+  phone text DEFAULT '',
+  fixed_cost numeric NOT NULL DEFAULT 0   -- biaya operasional TETAP per bulan (mengurangi net bagi hasil)
+);
+
+-- Biaya operasional VARIABEL per cabang per bulan (mengurangi net bagi hasil)
+CREATE TABLE IF NOT EXISTS cabang_var_cost (
+  cabang text NOT NULL,
+  periode text NOT NULL,          -- 'YYYY-MM'
+  nilai numeric NOT NULL DEFAULT 0,
+  PRIMARY KEY (cabang, periode)
 );
 
 CREATE TABLE IF NOT EXISTS users (

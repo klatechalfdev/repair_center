@@ -36,6 +36,7 @@
       'getDashboard2', 'exportTicketsExcel', 'buildNotifMessage',
       'getQC', 'saveQC', 'generateTicketHTML', 'generateQCPrintHTML',
       'adminListCabang', 'adminSaveCabang', 'adminDeleteCabang',
+      'adminListVarCost', 'adminSaveVarCost', 'adminDeleteVarCost',
       'adminListTeknisi', 'adminSaveTeknisi', 'adminDeleteTeknisi',
       'adminListUsers', 'adminSaveUser', 'adminDeleteUser', 'getBagiHasil', 'exportBagiHasilExcel'
     ];
@@ -503,6 +504,7 @@
     <div class="chip-tabs" id="adminNav">
       <button class="chip active" data-apane="teknisi">Teknisi &amp; Bagi Hasil</button>
       <button class="chip" data-apane="cabang">Cabang</button>
+      <button class="chip" data-apane="biayaops">Biaya Ops</button>
       <button class="chip" data-apane="user">User</button>
     </div>
 
@@ -553,9 +555,9 @@
             <button class="btn" id="bh_export">Export Excel</button>
           </div>
         </div>
-        <div class="small-note" style="margin-top:4px">Bagi hasil dihitung dari <b>Net = Profit (Total − Sparepart) − Pengeluaran cabang</b> pada tiket <b>Selesai/Diambil</b> yang dikerjakan teknisi tsb × persen. Pengeluaran cabang dialokasikan ke teknisi proporsional terhadap profit. Teknisi tipe Gaji tampil nominal tetap. Jika range diisi, filter bulan diabaikan.</div>
+        <div class="small-note" style="margin-top:4px">Bagi hasil = <b>Net × persen</b>, dengan <b>Net = Profit (Total − Sparepart) − Pengeluaran − Fixed − Variable</b> pada tiket <b>Selesai/Diambil</b> yang dikerjakan teknisi tsb. Pengeluaran (keuangan) + biaya Fixed/Variable cabang dialokasikan ke teknisi proporsional profit. Teknisi tipe Gaji tampil nominal tetap. Jika range diisi, filter bulan diabaikan.</div>
         <table style="margin-top:8px">
-          <thead><tr><th>Teknisi</th><th>Cabang</th><th>Tipe</th><th>Jml Tiket</th><th>Omset</th><th>Sparepart</th><th>Profit</th><th>Pengeluaran</th><th>Net</th><th>Persen/Gaji</th><th>Dibayar</th></tr></thead>
+          <thead><tr><th>Teknisi</th><th>Cabang</th><th>Tipe</th><th>Jml Tiket</th><th>Omset</th><th>Sparepart</th><th>Profit</th><th>Pengeluaran</th><th>Fixed</th><th>Variable</th><th>Net</th><th>Persen/Gaji</th><th>Dibayar</th></tr></thead>
           <tbody id="bh_rows"></tbody>
         </table>
       </div>
@@ -572,6 +574,7 @@
           <div><label for="cb_phone">Telepon</label><input id="cb_phone" inputmode="numeric"></div>
           <div><label for="cb_maps">Maps URL</label><input id="cb_maps" placeholder="https://maps.app.goo.gl/..."></div>
           <div><label for="cb_review">Review URL</label><input id="cb_review" placeholder="https://g.page/r/..."></div>
+          <div><label for="cb_fixed">Biaya Tetap / bulan (Rp)</label><input id="cb_fixed" type="text" inputmode="numeric" placeholder="cth: 500.000"></div>
           <div><label for="cb_aktif">Aktif</label><select id="cb_aktif"><option value="1">Ya</option><option value="0">Tidak</option></select></div>
         </div>
         <div class="row" style="margin-top:10px;justify-content:space-between">
@@ -585,8 +588,32 @@
       <div class="card" style="margin-top:12px">
         <h4>Daftar Cabang</h4>
         <table>
-          <thead><tr><th>Kode</th><th>Nama</th><th>Telepon</th><th>Aktif</th><th>Aksi</th></tr></thead>
+          <thead><tr><th>Kode</th><th>Nama</th><th>Telepon</th><th>Biaya Tetap/bln</th><th>Aktif</th><th>Aksi</th></tr></thead>
           <tbody id="cb_rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADMIN: BIAYA OPS (variable cost per bulan) -->
+    <div class="apane" id="apane-biayaops" style="display:none">
+      <div class="card">
+        <h4>Biaya Operasional Variabel (per bulan)</h4>
+        <div class="small-note">Biaya <b>tetap/fixed</b> diatur di tab <b>Cabang</b> (berlaku tiap bulan). Di sini isi biaya <b>variabel</b> per cabang per bulan (mis. transport, bonus, lembur). Keduanya mengurangi <b>Net</b> sebelum dibagi hasil, dialokasikan ke teknisi proporsional profit.</div>
+        <div class="grid g3" style="margin-top:8px">
+          <div><label for="vc_cabang">Cabang</label><select id="vc_cabang"><option value="">(pilih)</option></select></div>
+          <div><label for="vc_month">Bulan</label><select id="vc_month" style="min-width:140px"></select></div>
+          <div><label for="vc_nilai">Biaya Variabel (Rp)</label><input id="vc_nilai" type="text" inputmode="numeric" placeholder="cth: 150.000"></div>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:space-between">
+          <div class="row"><button class="btn primary" id="vc_save">Simpan</button></div>
+          <span id="vc_msg" class="muted"></span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <h4>Daftar Biaya Variabel</h4>
+        <table>
+          <thead><tr><th>Cabang</th><th>Bulan</th><th>Nilai</th><th>Aksi</th></tr></thead>
+          <tbody id="vc_rows"></tbody>
         </table>
       </div>
     </div>
@@ -1694,9 +1721,11 @@ function loadDashboard(){
     const omset       = d.totalOmset   || 0;
     const jasa        = d.jasaRevenue  ?? 0;
     const pengeluaran = d.totalExpense || 0;
+    const fixedCost   = d.fixedCost || 0;
+    const variableCost= d.variableCost || 0;
     const biayaSparepart = d.biayaSparepart || 0;
     const profit      = (d.totalProfit != null) ? d.totalProfit : (omset - biayaSparepart);
-    const netAkhir    = (d.netRevenue != null) ? d.netRevenue : (jasa - pengeluaran);
+    const netAkhir    = (d.netRevenue != null) ? d.netRevenue : (jasa - pengeluaran - fixedCost - variableCost);
 
     const kpi = (label,val,accent)=>`<div class="card"><div class="muted">${label}</div><div style="font-size:22px;font-weight:700;${accent?('color:'+accent):''}">${val}</div></div>`;
     stats.innerHTML = `
@@ -1709,7 +1738,9 @@ function loadDashboard(){
         ${kpi('Biaya Sparepart', fmtIDR(biayaSparepart))}
         ${kpi('Jasa', fmtIDR(jasa))}
         ${kpi('Pengeluaran (Keuangan)', fmtIDR(pengeluaran))}
-        ${kpi('Net (Jasa − Pengeluaran)', fmtIDR(netAkhir), netAkhir<0?'#dc2626':'#16a34a')}
+        ${kpi('Biaya Tetap (Fixed)', fmtIDR(fixedCost))}
+        ${kpi('Biaya Variabel', fmtIDR(variableCost))}
+        ${kpi('Net (Jasa − Pengeluaran − Fixed − Variable)', fmtIDR(netAkhir), netAkhir<0?'#dc2626':'#16a34a')}
       </div>`;
 
     const idr = v => 'Rp. '+ new Intl.NumberFormat('id-ID').format(Number(v||0));
@@ -1885,26 +1916,26 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
   /* ---------- BAGI HASIL ---------- */
   function loadBagiHasil(){
     const tb=$('bh_rows'); if(!tb) return;
-    tb.innerHTML='<tr><td colspan="11" class="muted">Loading...</td></tr>';
+    tb.innerHTML='<tr><td colspan="13" class="muted">Loading...</td></tr>';
     const filter={ month: $('bh_month').value, cabang: $('bh_cabang').value||'', dateFrom: $('bh_from').value||'', dateTo: $('bh_to').value||'' };
     google.script.run.withSuccessHandler(res=>{
       tb.innerHTML='';
       const rows=res.rows||[];
-      if(!rows.length){ tb.innerHTML='<tr><td colspan="11" class="empty">Belum ada teknisi.</td></tr>'; return; }
+      if(!rows.length){ tb.innerHTML='<tr><td colspan="13" class="empty">Belum ada teknisi.</td></tr>'; return; }
       let totBayar=0;
       rows.forEach(r=>{
         totBayar += r.totalDibayar||0;
         const pg = r.tipeBayar==='gaji' ? ('Gaji '+fmtIDR(r.gaji)) : (r.persen+'%');
-        const net = (r.profitBersih!=null) ? r.profitBersih : ((r.profit||0)-(r.pengeluaran||0));
+        const net = (r.profitBersih!=null) ? r.profitBersih : ((r.profit||0)-(r.pengeluaran||0)-(r.fixedCost||0)-(r.variableCost||0));
         const tr=document.createElement('tr');
         tr.innerHTML=`<td>${esc(r.nama)}</td><td>${esc(r.cabang)}</td><td>${tipeLabel(r.tipeBayar)}</td>
-          <td>${r.jumlahTiket}</td><td>${fmtIDR(r.totalOmset)}</td><td>${fmtIDR(r.totalSparepart)}</td><td>${fmtIDR(r.profit)}</td><td>${fmtIDR(r.pengeluaran||0)}</td><td>${fmtIDR(net)}</td><td>${pg}</td><td><b>${fmtIDR(r.totalDibayar)}</b></td>`;
+          <td>${r.jumlahTiket}</td><td>${fmtIDR(r.totalOmset)}</td><td>${fmtIDR(r.totalSparepart)}</td><td>${fmtIDR(r.profit)}</td><td>${fmtIDR(r.pengeluaran||0)}</td><td>${fmtIDR(r.fixedCost||0)}</td><td>${fmtIDR(r.variableCost||0)}</td><td>${fmtIDR(net)}</td><td>${pg}</td><td><b>${fmtIDR(r.totalDibayar)}</b></td>`;
         tb.appendChild(tr);
       });
       const tr=document.createElement('tr');
-      tr.innerHTML=`<td colspan="10" style="text-align:right"><b>Total Dibayar</b></td><td><b>${fmtIDR(totBayar)}</b></td>`;
+      tr.innerHTML=`<td colspan="12" style="text-align:right"><b>Total Dibayar</b></td><td><b>${fmtIDR(totBayar)}</b></td>`;
       tb.appendChild(tr);
-    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="11" class="empty">Error: '+e.message+'</td></tr>'; }).getBagiHasil(filter);
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="13" class="empty">Error: '+e.message+'</td></tr>'; }).getBagiHasil(filter);
   }
   $('bh_apply').addEventListener('click', loadBagiHasil);
   $('bh_month').addEventListener('change', ()=>{ $('bh_from').value=''; $('bh_to').value=''; loadBagiHasil(); });
@@ -1919,21 +1950,23 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
   /* ---------- CABANG ---------- */
   function cbReset(){
     $('cb_edit').value='0'; $('cb_kode').value=''; $('cb_kode').disabled=false; $('cb_nama').value='';
-    $('cb_phone').value=''; $('cb_maps').value=''; $('cb_review').value=''; $('cb_aktif').value='1';
+    $('cb_phone').value=''; $('cb_maps').value=''; $('cb_review').value=''; $('cb_fixed').value=''; $('cb_aktif').value='1';
     $('cb_form_title').textContent='Tambah Cabang'; $('cb_msg').textContent='';
   }
   function loadCabangAdmin(){
-    const tb=$('cb_rows'); tb.innerHTML='<tr><td colspan="5" class="muted">Loading...</td></tr>';
+    const tb=$('cb_rows'); tb.innerHTML='<tr><td colspan="6" class="muted">Loading...</td></tr>';
     google.script.run.withSuccessHandler(list=>{
       CB_CACHE = list.map(c=>({kode:c.kode, nama:c.nama}));
       fillCabangSelect($('tk_cabang'), false);
       fillCabangSelect($('us_cabang'), false);
       fillCabangSelect($('bh_cabang'), true);
+      if(typeof fillCabangSelect==='function' && $('vc_cabang')) fillCabangSelect($('vc_cabang'), false);
       tb.innerHTML='';
-      if(!list.length){ tb.innerHTML='<tr><td colspan="5" class="empty">Belum ada cabang.</td></tr>'; return; }
+      if(!list.length){ tb.innerHTML='<tr><td colspan="6" class="empty">Belum ada cabang.</td></tr>'; return; }
       list.forEach(c=>{
         const tr=document.createElement('tr');
         tr.innerHTML=`<td>${esc(c.kode)}</td><td>${esc(c.nama)}</td><td>${esc(c.phone)}</td>
+          <td>${fmtIDR(c.fixedCost||0)}</td>
           <td>${c.aktif?'Ya':'Tidak'}</td>
           <td><button class="btn small" data-edit='${JSON.stringify(c).replace(/'/g,"&#39;")}'>Edit</button>
               <button class="btn small ghost" data-del="${esc(c.kode)}">Hapus</button></td>`;
@@ -1943,6 +1976,7 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
         const c=JSON.parse(b.getAttribute('data-edit'));
         $('cb_edit').value='1'; $('cb_kode').value=c.kode; $('cb_kode').disabled=true; $('cb_nama').value=c.nama||'';
         $('cb_phone').value=c.phone||''; $('cb_maps').value=c.mapsUrl||''; $('cb_review').value=c.reviewUrl||'';
+        $('cb_fixed').value=formatThousands(String(c.fixedCost||0));
         $('cb_aktif').value=c.aktif?'1':'0'; $('cb_form_title').textContent='Edit Cabang: '+c.kode; $('cb_msg').textContent='';
       });
       tb.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
@@ -1950,12 +1984,12 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
         google.script.run.withSuccessHandler(()=>{ loadCabangAdmin(); })
           .withFailureHandler(e=>alert('Gagal: '+e.message)).adminDeleteCabang(b.dataset.del);
       });
-    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="5" class="empty">Error: '+e.message+'</td></tr>'; }).adminListCabang();
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="6" class="empty">Error: '+e.message+'</td></tr>'; }).adminListCabang();
   }
   $('cb_reset').addEventListener('click', cbReset);
   $('cb_save').addEventListener('click', ()=>{
     const payload={ kode:$('cb_kode').value.trim(), nama:$('cb_nama').value.trim(), phone:$('cb_phone').value.trim(),
-      mapsUrl:$('cb_maps').value.trim(), reviewUrl:$('cb_review').value.trim(), aktif: $('cb_aktif').value==='1' };
+      mapsUrl:$('cb_maps').value.trim(), reviewUrl:$('cb_review').value.trim(), fixedCost: parseIntID($('cb_fixed').value), aktif: $('cb_aktif').value==='1' };
     if(!payload.kode||!payload.nama){ $('cb_msg').textContent='Kode & nama wajib.'; return; }
     const unlock=lockBtn($('cb_save'),'Menyimpan…'); $('cb_msg').textContent='Menyimpan...';
     google.script.run.withSuccessHandler(()=>{ unlock(); $('cb_msg').textContent='Tersimpan.'; cbReset(); loadCabangAdmin(); if(AUTH&&AUTH.isAdmin) loadBranches(); })
@@ -2003,15 +2037,49 @@ $('btnRangeClear').addEventListener('click', ()=>{ $('dash_from').value=''; $('d
       .withFailureHandler(e=>{ unlock(); $('us_msg').textContent='Error: '+e.message; }).adminSaveUser(payload);
   });
 
+  /* ---------- BIAYA OPS (variable cost per bulan) ---------- */
+  function vcReset(){ $('vc_nilai').value=''; $('vc_msg').textContent=''; }
+  function loadVarCost(){
+    const tb=$('vc_rows'); if(!tb) return;
+    tb.innerHTML='<tr><td colspan="4" class="muted">Loading...</td></tr>';
+    google.script.run.withSuccessHandler(list=>{
+      tb.innerHTML='';
+      if(!list.length){ tb.innerHTML='<tr><td colspan="4" class="empty">Belum ada biaya variabel.</td></tr>'; return; }
+      list.forEach(v=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${esc(v.cabang)}</td><td>${esc(v.periode)}</td><td>${fmtIDR(v.nilai)}</td>
+          <td><button class="btn small ghost" data-vcdel='${JSON.stringify({cabang:v.cabang,periode:v.periode}).replace(/'/g,"&#39;")}'>Hapus</button></td>`;
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('[data-vcdel]').forEach(b=> b.onclick=()=>{
+        const p=JSON.parse(b.getAttribute('data-vcdel'));
+        if(!confirm('Hapus biaya variabel '+p.cabang+' '+p.periode+'?')) return;
+        google.script.run.withSuccessHandler(()=>{ loadVarCost(); if(typeof loadBagiHasil==='function') loadBagiHasil(); })
+          .withFailureHandler(e=>alert('Gagal: '+e.message)).adminDeleteVarCost(p);
+      });
+    }).withFailureHandler(e=>{ tb.innerHTML='<tr><td colspan="4" class="empty">Error: '+e.message+'</td></tr>'; }).adminListVarCost();
+  }
+  if($('vc_save')) $('vc_save').addEventListener('click', ()=>{
+    const payload={ cabang:$('vc_cabang').value, periode:$('vc_month').value, nilai: parseIntID($('vc_nilai').value) };
+    if(!payload.cabang){ $('vc_msg').textContent='Pilih cabang.'; return; }
+    if(!payload.periode){ $('vc_msg').textContent='Pilih bulan.'; return; }
+    const unlock=lockBtn($('vc_save'),'Menyimpan…'); $('vc_msg').textContent='Menyimpan...';
+    google.script.run.withSuccessHandler(()=>{ unlock(); $('vc_msg').textContent='Tersimpan.'; vcReset(); loadVarCost(); if(typeof loadBagiHasil==='function') loadBagiHasil(); })
+      .withFailureHandler(e=>{ unlock(); $('vc_msg').textContent='Error: '+e.message; }).adminSaveVarCost(payload);
+  });
+  bindMoneyInput('vc_nilai');
+  bindMoneyInput('cb_fixed');
+
   /* ---------- loader saat tab dibuka ---------- */
   let adminInited=false;
   window.loadAdminAll = function(){
     if(!AUTH || !AUTH.isAdmin) return;
-    if(!adminInited){ buildMonthOptions('bh_month'); adminInited=true; }
+    if(!adminInited){ buildMonthOptions('bh_month'); buildMonthOptions('vc_month'); adminInited=true; }
     tkToggleTipe();
-    loadCabangAdmin();      // mengisi select cabang juga
+    loadCabangAdmin();      // mengisi select cabang juga (termasuk vc_cabang)
     loadTeknisiAdmin();
     loadUsersAdmin();
+    loadVarCost();
     setTimeout(loadBagiHasil, 300); // setelah cabang termuat
   };
   // Pemuatan data admin dipicu oleh goToTab('admin') di handler tab utama.
