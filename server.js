@@ -927,22 +927,28 @@ async function _computeBagiHasil(filter) {
   const ymSel = String(filter.month || (hasRange ? '' : ym(new Date())));
   const from = hasRange ? new Date((filter.dateFrom || ymd(new Date())) + 'T00:00:00') : null;
   const to = hasRange ? new Date((filter.dateTo || ymd(new Date())) + 'T23:59:59') : null;
+  const inPeriod = (t) => {
+    if (!t) return false;
+    if (hasRange) { const dd = new Date(t); if (from && dd < from) return false; if (to && dd > to) return false; return true; }
+    return ym(t) === ymSel;
+  };
 
   // Tiket yang sudah dikerjakan (Selesai/Diambil) pada periode
   const { rows: tickets } = await pool.query('SELECT teknisi, status, tanggal, biaya_jasa, biaya_sparepart, total, cabang FROM tiket');
   const DONE = { 'Selesai': true, 'Diambil': true };
-  const agg = {}; // key: norm(nama) -> {jumlah, omset, sparepart, profit}
+  const agg = {};       // key: norm(nama) -> {jumlah, omset, sparepart, profit}
+  const cabProfit = {}; // norm(cabang) -> total profit teknisi bernama (basis alokasi pengeluaran)
   tickets.forEach(r => {
     if (!DONE[String(r.status || '')]) return;
     if (cabFilter && norm(r.cabang) !== cabFilter) return;
-    const t = r.tanggal; if (!t) return;
-    if (hasRange) { const dd = new Date(t); if (from && dd < from) return; if (to && dd > to) return; }
-    else { if (ym(t) !== ymSel) return; }
+    if (!inPeriod(r.tanggal)) return;
     const key = norm(r.teknisi);
     if (!key) return;
     if (!agg[key]) agg[key] = { jumlah: 0, omset: 0, sparepart: 0, profit: 0 };
     const om = num(r.total), sp = num(r.biaya_sparepart);
     agg[key].jumlah++; agg[key].omset += om; agg[key].sparepart += sp; agg[key].profit += (om - sp);
+    const ck = norm(r.cabang);
+    cabProfit[ck] = (cabProfit[ck] || 0) + (om - sp);
   });
 
   const args = [];
@@ -951,15 +957,29 @@ async function _computeBagiHasil(filter) {
   sql += ' ORDER BY cabang, nama';
   const { rows: tek } = await pool.query(sql, args);
 
+  // Pengeluaran (keuangan) per cabang pada periode — dipotong SEBELUM bagi hasil
+  const expenseByCab = {};
+  for (const ck of new Set(tek.map(r => norm(r.cabang)))) {
+    if (!ck) continue;
+    expenseByCab[ck] = await sumExpense(ck, inPeriod);
+  }
+
   const list = tek.map(r => {
     const a = agg[norm(r.nama)] || { jumlah: 0, omset: 0, sparepart: 0, profit: 0 };
     const tipe = r.tipe_bayar || 'bagihasil';
     const persen = num(r.bagi_hasil);
     const gaji = num(r.gaji);
-    const bagiHasil = (tipe === 'bagihasil') ? Math.round(a.profit * persen / 100) : 0;
+    // Alokasikan pengeluaran cabang ke teknisi proporsional terhadap profit-nya.
+    // (Untuk cabang 1 teknisi, seluruh pengeluaran jatuh ke teknisi tsb.)
+    const ck = norm(r.cabang);
+    const cabTot = cabProfit[ck] || 0;
+    const pengeluaran = (cabTot > 0) ? Math.round((expenseByCab[ck] || 0) * (a.profit / cabTot)) : 0;
+    const profitBersih = a.profit - pengeluaran;
+    const bagiHasil = (tipe === 'bagihasil') ? Math.round(profitBersih * persen / 100) : 0;
     return {
       id: r.id, nama: r.nama || '', cabang: r.cabang || '', tipeBayar: tipe,
-      persen, gaji, jumlahTiket: a.jumlah, totalOmset: a.omset, totalSparepart: a.sparepart, profit: a.profit,
+      persen, gaji, jumlahTiket: a.jumlah, totalOmset: a.omset, totalSparepart: a.sparepart,
+      profit: a.profit, pengeluaran, profitBersih,
       bagiHasil, totalDibayar: (tipe === 'gaji') ? gaji : bagiHasil
     };
   });
@@ -976,16 +996,18 @@ async function exportBagiHasilExcel(filter, auth) {
   const ws = wb.addWorksheet('BAGI HASIL');
   ws.addRow(['Periode', data.period]);
   ws.addRow([]);
-  ws.addRow(['Teknisi', 'Cabang', 'Tipe Bayar', 'Jml Tiket', 'Omset', 'Sparepart', 'Profit', 'Persen (%)', 'Gaji', 'Dibayar']);
+  ws.addRow(['Teknisi', 'Cabang', 'Tipe Bayar', 'Jml Tiket', 'Omset', 'Sparepart', 'Profit', 'Pengeluaran', 'Net', 'Persen (%)', 'Gaji', 'Dibayar']);
   ws.getRow(3).font = { bold: true };
   let tot = 0;
   data.rows.forEach(r => {
     tot += num(r.totalDibayar);
     ws.addRow([r.nama, r.cabang, (r.tipeBayar === 'gaji' ? 'Gaji' : 'Bagi Hasil'), r.jumlahTiket,
-      num(r.totalOmset), num(r.totalSparepart), num(r.profit), num(r.persen), num(r.gaji), num(r.totalDibayar)]);
+      num(r.totalOmset), num(r.totalSparepart), num(r.profit), num(r.pengeluaran),
+      (r.profitBersih != null ? num(r.profitBersih) : num(r.profit) - num(r.pengeluaran)),
+      num(r.persen), num(r.gaji), num(r.totalDibayar)]);
   });
   ws.addRow([]);
-  ws.addRow(['', '', '', '', '', '', '', '', 'TOTAL DIBAYAR', tot]).font = { bold: true };
+  ws.addRow(['', '', '', '', '', '', '', '', '', '', 'TOTAL DIBAYAR', tot]).font = { bold: true };
   ws.columns.forEach(c => { let m = 10; c.eachCell(cell => { m = Math.max(m, String(cell.value == null ? '' : cell.value).length + 2); }); c.width = Math.min(m, 40); });
   const buf = await wb.xlsx.writeBuffer();
   return { b64: Buffer.from(buf).toString('base64'), filename: `BAGI_HASIL_${data.period.replace(/[^\w-]/g, '_')}_${Date.now()}.xlsx` };
